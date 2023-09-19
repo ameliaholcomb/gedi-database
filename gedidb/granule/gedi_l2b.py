@@ -2,12 +2,12 @@ import geopandas as gpd
 import pandas as pd
 import pathlib
 
-from gedidb.granule.gedi_granule import GediGranule, GediBeam
+from gedidb.granule import gedi_granule
 from gedidb.granule import granule_name
 
 
-class L2BBeam(GediBeam):
-    def __init__(self, granule: GediGranule, beam_name: str):
+class L2BBeam(gedi_granule.GediBeam):
+    def __init__(self, granule: gedi_granule.GediGranule, beam_name: str):
         super().__init__(granule=granule, beam_name=beam_name)
 
     @property
@@ -63,7 +63,7 @@ class L2BBeam(GediBeam):
             "pgap_theta": self["pgap_theta"][:],
             "pgap_theta_error": self["pgap_theta_error"][:],
             "rg": self["rg"][:],
-            "rh100": self["rh100"][:],
+            "rh_100": self["rh100"][:],
             "rhog": self["rhog"][:],
             "rhog_error": self["rhog_error"][:],
             "rhov": self["rhov"][:],
@@ -77,6 +77,12 @@ class L2BBeam(GediBeam):
             "gridded_leaf_off_flag": self["land_cover_data/leaf_off_flag"][:],
             "gridded_leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
             "gridded_leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
+            "gridded_water_persistence": self[
+                "land_cover_data/landsat_water_persistence"
+            ][:],
+            "gridded_urban_proportion": self[
+                "land_cover_data/urban_proportion"
+            ][:],
             "interpolated_modis_nonvegetated": self[
                 "land_cover_data/modis_nonvegetated"
             ][:],
@@ -115,8 +121,46 @@ class L2BBeam(GediBeam):
         )
         return data
 
+    def quality_filter(self):
+        """Perform quality-filtering on main data.
 
-class L2BGranule(GediGranule):
+        Until this function is called, all granule shots will be included in
+         main_data. This filtering can be undone by resetting the cache.
+        """
+
+        filtered = self.main_data
+        filtered["elevation_difference_tdx"] = (
+            filtered["elev_lowestmode"] - filtered["dem_tandemx"]
+        )
+        filtered = filtered[
+            (filtered["l2a_quality_flag"] == 1)
+            & (filtered["l2b_quality_flag"] == 1)
+            & (filtered["algorithm_run_flag"] == 1)
+            & (filtered["sensitivity"] >= 0.9)
+            & (filtered["sensitivity"] <= 1.0)
+            & (filtered["degrade_flag"].isin(gedi_granule.QDEGRADE))
+            & (filtered["rh_100"] >= 0)
+            & (filtered["rh_100"] < 120)
+            & (filtered["surface_flag"] == 1)
+            & (filtered["elevation_difference_tdx"] > -150)
+            & (filtered["elevation_difference_tdx"] < 150)
+            & (filtered["gridded_water_persistence"] < 10)
+            & (filtered["gridded_urban_proportion"] < 50)
+        ]
+        filtered = filtered.drop(
+            [
+                "l2a_quality_flag",
+                "l2b_quality_flag",
+                "algorithm_run_flag",
+                "surface_flag",
+            ],
+            axis=1,
+        )
+
+        self._cached_data = filtered
+
+
+class L2BGranule(gedi_granule.GediGranule):
     def __init__(self, file_path: pathlib.Path):
         super().__init__(file_path)
 
@@ -128,7 +172,7 @@ class L2BGranule(GediGranule):
             )
         return self._parsed_filename_metadata
 
-    def _beam_from_name(self, beam_name: str) -> GediBeam:
+    def _beam_from_name(self, beam_name: str) -> gedi_granule.GediBeam:
         if not beam_name in self.beam_names:
             raise ValueError(f"Beam name must be one of {self.beam_names}")
         return L2BBeam(granule=self, beam_name=beam_name)

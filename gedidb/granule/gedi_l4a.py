@@ -2,13 +2,13 @@ import geopandas as gpd
 import pandas as pd
 import pathlib
 
-from gedidb.granule.gedi_granule import GediGranule, GediBeam
+from gedidb.granule import gedi_granule
 from gedidb.granule import granule_name
 from gedidb.constants import WGS84
 
 
-class L4ABeam(GediBeam):
-    def __init__(self, granule: GediGranule, beam_name: str):
+class L4ABeam(gedi_granule.GediBeam):
+    def __init__(self, granule: gedi_granule.GediGranule, beam_name: str):
         super().__init__(granule=granule, beam_name=beam_name)
 
     @property
@@ -45,7 +45,8 @@ class L4ABeam(GediBeam):
                 + pd.to_timedelta(self["delta_time"], unit="seconds")
             ),
             # Quality data
-            "sensitivity": self["sensitivity"][:],
+            "sensitivity_a0": self["sensitivity"][:],
+            "sensitivity_a2": self["geolocation/sensitivity_a2"][:],
             "algorithm_run_flag": self["algorithm_run_flag"][:],
             "degrade_flag": self["degrade_flag"][:],
             "l2_quality_flag": self["l2_quality_flag"][:],
@@ -67,14 +68,66 @@ class L4ABeam(GediBeam):
             "agbd_se": self["agbd_se"][:],
             "agbd_t": self["agbd_t"][:],
             "agbd_t_se": self["agbd_t_se"][:],
-            # Land cover data
-            "pft_class": self["land_cover_data/pft_class"][:],
-            "region_class": self["land_cover_data/region_class"][:],
+            # Land cover data: NOTE this is gridded and/or derived data
+            "gridded_pft_class": self["land_cover_data/pft_class"][:],
+            "gridded_region_class": self["land_cover_data/region_class"][:],
+            "gridded_urban_proportion": self[
+                "land_cover_data/urban_proportion"
+            ][:],
+            "gridded_water_persistence": self[
+                "land_cover_data/landsat_water_persistence"
+            ][:],
+            "gridded_leaf_off_flag": self["land_cover_data/leaf_off_flag"][:],
+            "gridded_leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
+            "gridded_leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
         }
         return data
 
+    def quality_filter(self):
+        """Perform quality-filtering on main data.
 
-class L4AGranule(GediGranule):
+        Until this function is called, all granule shots will be included in
+         main_data. This filtering can be undone by resetting the cache.
+        """
+
+        filtered = self.main_data
+        filtered = filtered[
+            (filtered["l2_quality_flag"] == 1)
+            & (filtered["l4_quality_flag"] == 1)
+            & (filtered["algorithm_run_flag"] == 1)
+            & (filtered["sensitivity_a0"] >= 0.9)
+            & (filtered["sensitivity_a0"] <= 1.0)
+            & (filtered["sensitivity_a2"] <= 1.0)
+            & (filtered["degrade_flag"].isin(gedi_granule.QDEGRADE))
+            & (filtered["surface_flag"] == 1)
+        ]
+        filtered = filtered[
+            (
+                (filtered["gridded_pft_class"] == 2)
+                & (filtered["sensitivity_a2"] > 0.98)
+            )
+            | (
+                (filtered["gridded_pft_class"] != 2)
+                & (filtered["sensitivity_a2"] > 0.95)
+            )
+        ]
+        filtered = filtered[
+            (filtered["gridded_water_persistence"] < 10)
+            & (filtered["gridded_urban_proportion"] < 50)
+        ]
+        filtered = filtered.drop(
+            [
+                "l2_quality_flag",
+                "l4_quality_flag",
+                "algorithm_run_flag",
+                "surface_flag",
+            ],
+            axis=1,
+        )
+        self._cached_data = filtered
+
+
+class L4AGranule(gedi_granule.GediGranule):
     def __init__(self, file_path: pathlib.Path):
         super().__init__(file_path)
 
@@ -86,7 +139,7 @@ class L4AGranule(GediGranule):
             )
         return self._parsed_filename_metadata
 
-    def _beam_from_name(self, beam_name: str) -> GediBeam:
+    def _beam_from_name(self, beam_name: str) -> gedi_granule.GediBeam:
         if not beam_name in self.beam_names:
             raise ValueError(f"Beam name must be one of {self.beam_names}")
         return L4ABeam(granule=self, beam_name=beam_name)

@@ -11,19 +11,22 @@ class TestCase(unittest.TestCase):
         granule = gedi_l4a.L4AGranule(L4A_NAME)
         self.assertEqual(granule.n_beams, 8)
         for beam in granule.iter_beams():
-            beam.main_data
+            beam.quality_filter()
+            _ = beam.main_data
 
     def test_parse_granule_l2b(self):
         granule = gedi_l2b.L2BGranule(L2B_NAME)
         self.assertEqual(granule.n_beams, 8)
         for beam in granule.iter_beams():
-            beam.main_data
+            beam.quality_filter()
+            _ = beam.main_data
 
     def test_parse_granule_l2a(self):
         granule = gedi_l2a.L2AGranule(L2A_NAME)
         self.assertEqual(granule.n_beams, 8)
         for beam in granule.iter_beams():
-            beam.main_data
+            beam.quality_filter()
+            _ = beam.main_data
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestCase)

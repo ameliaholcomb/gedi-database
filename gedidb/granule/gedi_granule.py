@@ -11,6 +11,7 @@ from shapely.geometry import box
 from typing import Iterable, Union, List
 from gedidb.constants import WGS84
 
+QDEGRADE = [0, 3, 8, 10, 13, 18, 20, 23, 28, 30, 33, 38, 40, 43, 48, 60, 63, 68]
 
 class GediGranule(h5py.File):  # TODO  pylint: disable=missing-class-docstring
     def __init__(self, file_path: pathlib.Path):
@@ -128,15 +129,6 @@ class GediBeam(h5py.Group):
     Args:
         granule: The parent granule for this beam
         beam name: The name of this beam, e.g. BEAM0000
-        roi (optional): A bounding box for the region of interest.
-            GEDI granule files include the entire global granule track,
-            which is often not needed for a small region of interest. If
-            a bounding box is provided, this class will *attempt* to perform
-            optimizations such that computationally intensive data parsing
-            operations take place only on the data within the region of interest.
-            This will result in ONLY shots falling within the roi being included
-            in the cached data (returned by main_data
-            To re-parse the file with a new roi, use beam.reset_roi().
     """
 
     def __init__(self, granule: GediGranule, beam_name: str, roi: box = None):
@@ -144,7 +136,6 @@ class GediBeam(h5py.Group):
         self.parent_granule = granule  # Reference to parent granule
         self._cached_data = None
         self._shot_geolocations = None
-        self.roi = roi
 
     def list_datasets(self, top_level_only: bool = True) -> list[str]:
         if top_level_only:
@@ -178,11 +169,9 @@ class GediBeam(h5py.Group):
         return len(self["beam"])
 
     @property
-    def main_data(self, sql_format_arrays=False) -> gpd.GeoDataFrame:
+    def main_data(self) -> gpd.GeoDataFrame:
         """
         Return the main data for all shots in beam as geopandas DataFrame.
-
-        Supports the following products: GEDI_L1B, GEDI_L2A
 
         Returns:
             gpd.GeoDataFrame: A geopandas DataFrame containing the main data for the given beam object.
@@ -206,12 +195,6 @@ class GediBeam(h5py.Group):
             self._cached_data[c] = self.main_data[c].map(self._arr_to_str)
 
     def reset_cache(self):
-        self._cached_data = None
-
-    def reset_roi(self, new_roi: box = None) -> None:
-        if new_roi == self.roi:
-            return None
-        self.roi = new_roi
         self._cached_data = None
 
     def _accumulate_waveform_data(
