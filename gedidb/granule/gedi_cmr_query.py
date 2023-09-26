@@ -7,7 +7,8 @@ from pathlib import Path
 import requests
 from shapely.geometry import MultiPolygon, Polygon
 from typing import Dict, Optional, Tuple
-from biomassrecovery.constants import GediProduct
+
+from gedidb.constants import GediProduct
 
 
 CMR_URL = "https://cmr.earthdata.nasa.gov/search/"
@@ -32,7 +33,6 @@ def _get_cmr_id(product: GediProduct) -> str:
 def _construct_temporal_params(
     date_range: Optional[Tuple[dt.datetime, dt.datetime]]
 ) -> Optional[str]:
-
     param_str = ""
     if not date_range:
         return {}
