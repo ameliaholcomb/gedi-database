@@ -10,8 +10,10 @@ from shapely.geometry import box
 
 from typing import Iterable, Union, List
 from gedidb.constants import WGS84
+from gedidb.granule import granule_name
 
 QDEGRADE = [0, 3, 8, 10, 13, 18, 20, 23, 28, 30, 33, 38, 40, 43, 48, 60, 63, 68]
+
 
 class GediGranule(h5py.File):  # TODO  pylint: disable=missing-class-docstring
     def __init__(self, file_path: pathlib.Path):
@@ -21,6 +23,14 @@ class GediGranule(h5py.File):  # TODO  pylint: disable=missing-class-docstring
             name for name in self.keys() if name.startswith("BEAM")
         ]
         self._parsed_filename_metadata = None
+
+    @property
+    def filename_metadata(self) -> granule_name.GediNameMetadata:
+        if self._parsed_filename_metadata is None:
+            self._parsed_filename_metadata = (
+                granule_name.parse_granule_filename(self.filename)
+            )
+        return self._parsed_filename_metadata
 
     @property
     def version(self) -> str:

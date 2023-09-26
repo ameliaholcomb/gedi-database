@@ -164,14 +164,6 @@ class L2BGranule(gedi_granule.GediGranule):
     def __init__(self, file_path: pathlib.Path):
         super().__init__(file_path)
 
-    @property
-    def filename_metadata(self) -> granule_name.GediNameMetadata:
-        if self._parsed_filename_metadata is None:
-            self._parsed_filename_metadata = (
-                granule_name._parse_lp_granule_filename(self.filename)
-            )
-        return self._parsed_filename_metadata
-
     def _beam_from_name(self, beam_name: str) -> gedi_granule.GediBeam:
         if not beam_name in self.beam_names:
             raise ValueError(f"Beam name must be one of {self.beam_names}")
