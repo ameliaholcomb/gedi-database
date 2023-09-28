@@ -2,12 +2,17 @@ from geopandas import gpd
 from shapely.geometry.polygon import orient
 from shapely.geometry import box
 
+
 class DetailError(Exception):
     """Used when too many points in a shape for NASA's API"""
+
     def __init__(self, n_coords: int):
         self.n_coords = n_coords
 
-def check_and_format_shape(shp: gpd.GeoDataFrame, simplify: bool = False, max_coords: int = 4999) -> gpd.GeoSeries:
+
+def check_and_format_shape(
+    shp: gpd.GeoDataFrame, simplify: bool = False, max_coords: int = 4999
+) -> gpd.GeoSeries:
     """
     Checks a shape for compatibility with NASA's API.
 
@@ -41,7 +46,9 @@ def check_and_format_shape(shp: gpd.GeoDataFrame, simplify: bool = False, max_co
     if n_coords > max_coords:
         if not simplify:
             raise DetailError(n_coords)
-        oriented = gpd.GeoSeries(box(*row.bounds))
+        row = row.convex_hull
+        print(f"Simplified to {len(row.exterior.coords)} coords")
+        multi = False
 
     if multi and oriented is None:
         oriented = gpd.GeoSeries([orient(s) for s in row.geoms])
