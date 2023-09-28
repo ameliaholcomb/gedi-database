@@ -1,10 +1,13 @@
 from dataclasses import dataclass
 import re
 
+# "GEDI02_A_2019268053258_O04446_04_T02132_02_003_01_V002.h5"
+# GEDI02_A_YYYYDDDHHMMSS_O[orbit_number]_[granule_number]_T[track_number]_[PPDS_type]_ [release_number]_[production_version]_V[version_number].h5
+
 
 @dataclass
 class GediNameMetadata:
-    """Data class container for metadata derived from GEDI file name conventions."""
+    """Data class container for metadata derived from GEDI file name conventions. THE ORDER MUST MATCH THE ORDER OF THE REGEX GROUPS."""
 
     product: str
     year: str
@@ -13,15 +16,15 @@ class GediNameMetadata:
     minute: str
     second: str
     orbit: str
+    sub_orbit_granule: str
     ground_track: str
     positioning: str
-    granule_production_version: str
     release_number: str
-    sub_orbit_granule: str
-    pge_version_number: str
+    granule_production_version: str
+    major_version_number: str
 
 
-GEDI_SUBPATTERN_LP = GediNameMetadata(
+GEDI_SUBPATTERN = GediNameMetadata(
     product=r"\w+_\w",
     year=r"\d{4}",
     julian_day=r"\d{3}",
@@ -32,14 +35,13 @@ GEDI_SUBPATTERN_LP = GediNameMetadata(
     sub_orbit_granule=r"\d{2}",
     ground_track=r"T\d+",
     positioning=r"\d{2}",
-    pge_version_number=r"\d{3}",
+    release_number=r"\d{3}",
     granule_production_version=r"\d{2}",
-    release_number=r"V\d+",
+    major_version_number=r"V\d+",
 )
 
 
 def parse_granule_filename(gedi_filename: str) -> GediNameMetadata:
-    GEDI_SUBPATTERN = GEDI_SUBPATTERN_LP
     gedi_naming_pattern = re.compile(
         (
             f"({GEDI_SUBPATTERN.product})"
@@ -52,9 +54,9 @@ def parse_granule_filename(gedi_filename: str) -> GediNameMetadata:
             f"_({GEDI_SUBPATTERN.sub_orbit_granule})"
             f"_({GEDI_SUBPATTERN.ground_track})"
             f"_({GEDI_SUBPATTERN.positioning})"
-            f"_({GEDI_SUBPATTERN.pge_version_number})"
-            f"_({GEDI_SUBPATTERN.granule_production_version})"
             f"_({GEDI_SUBPATTERN.release_number})"
+            f"_({GEDI_SUBPATTERN.granule_production_version})"
+            f"_({GEDI_SUBPATTERN.major_version_number})"
         )
     )
     parse_result = re.search(gedi_naming_pattern, gedi_filename)
