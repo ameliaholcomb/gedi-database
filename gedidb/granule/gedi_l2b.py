@@ -1,4 +1,5 @@
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pathlib
 
@@ -94,6 +95,7 @@ class L2BBeam(gedi_granule.GediBeam):
             # Processing data
             "selected_l2a_algorithm": self["selected_l2a_algorithm"][:],
             "selected_rg_algorithm": self["selected_rg_algorithm"][:],
+            "dz": np.repeat(self["ancillary/dz"][:], self.n_shots),
             # Geolocation data
             "lon_highestreturn": self["geolocation/lon_highestreturn"][:],
             "lon_lowestmode": self["geolocation/lon_lowestmode"][:],
@@ -112,13 +114,13 @@ class L2BBeam(gedi_granule.GediBeam):
             "waveform_start": self["rx_sample_start_index"][:] - 1,
         }
 
-        # handle array data
-        ## could delete waveform start/count after storing waveform chunks
-        start = data["waveform_start"]
-        end = start + data["waveform_count"]
-        data["pgap_theta_z"] = self._accumulate_waveform_data(
-            "pgap_theta_z", start, end
-        )
+        # For now, we're not using pgap_theta_z
+        # but leaving this code here in case someone finds it useful
+        # start = data["waveform_start"]
+        # end = start + data["waveform_count"]
+        # data["pgap_theta_z"] = self._accumulate_waveform_data(
+        #     "pgap_theta_z", start, end
+        # )
         return data
 
     def quality_filter(self):
@@ -140,7 +142,8 @@ class L2BBeam(gedi_granule.GediBeam):
             & (filtered["sensitivity"] <= 1.0)
             & (filtered["degrade_flag"].isin(gedi_granule.QDEGRADE))
             & (filtered["rh_100"] >= 0)
-            & (filtered["rh_100"] < 120)
+            # L2B RH_100 is in cm, not m like L2A
+            & (filtered["rh_100"] < 12000)
             & (filtered["surface_flag"] == 1)
             & (filtered["elevation_difference_tdx"] > -150)
             & (filtered["elevation_difference_tdx"] < 150)
