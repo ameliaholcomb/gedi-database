@@ -43,7 +43,12 @@ class L2ABeam(gedi_granule.GediBeam):
             ),
             # Quality data
             "sensitivity_a0": self["sensitivity"][:],
+            "sensitivity_a1": self["geolocation/sensitivity_a1"][:],
             "sensitivity_a2": self["geolocation/sensitivity_a2"][:],
+            "sensitivity_a3": self["geolocation/sensitivity_a3"][:],
+            "sensitivity_a4": self["geolocation/sensitivity_a4"][:],
+            "sensitivity_a5": self["geolocation/sensitivity_a5"][:],
+            "sensitivity_a6": self["geolocation/sensitivity_a6"][:],
             "quality_flag": self["quality_flag"][:],
             "degrade_flag": self["degrade_flag"][:],
             "solar_elevation": self["solar_elevation"][:],
