@@ -46,22 +46,16 @@ def parse_file_l2a(file: Path, quality_filter=True) -> gpd.GeoDataFrame:
 def _parse(granule: GediGranule, quality_filter=True) -> gpd.GeoDataFrame:
     granule_data = []
     for beam in tqdm(granule.iter_beams(), total=granule.n_beams):
-        print(beam)
-        print(len(beam.main_data))
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 if quality_filter:
                     beam.quality_filter()
-                    print(len(beam.main_data))
                 beam.sql_format_arrays()
-                print(len(beam.main_data))
                 granule_data.append(beam.main_data)
         except KeyError as e:
-            print(e)
             continue
     df = pd.concat(granule_data, ignore_index=True)
-    print(len(df))
     gdf = gpd.GeoDataFrame(df, crs=WGS84)
     granule.close()
     return gdf
