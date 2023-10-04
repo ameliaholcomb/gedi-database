@@ -47,6 +47,7 @@ class L4ABeam(gedi_granule.GediBeam):
             # Quality data
             "sensitivity_a0": self["sensitivity"][:],
             "sensitivity_a2": self["geolocation/sensitivity_a2"][:],
+            "sensitivity_a10": self["geolocation/sensitivity_a10"][:],
             "algorithm_run_flag": self["algorithm_run_flag"][:],
             "degrade_flag": self["degrade_flag"][:],
             "l2_quality_flag": self["l2_quality_flag"][:],
@@ -69,17 +70,14 @@ class L4ABeam(gedi_granule.GediBeam):
             "agbd_t": self["agbd_t"][:],
             "agbd_t_se": self["agbd_t_se"][:],
             # Land cover data: NOTE this is gridded and/or derived data
-            "gridded_pft_class": self["land_cover_data/pft_class"][:],
-            "gridded_region_class": self["land_cover_data/region_class"][:],
-            "gridded_urban_proportion": self[
-                "land_cover_data/urban_proportion"
-            ][:],
-            "gridded_water_persistence": self[
+            "pft_class": self["land_cover_data/pft_class"][:],
+            "region_class": self["land_cover_data/region_class"][:],
+            "urban_proportion": self["land_cover_data/urban_proportion"][:],
+            "water_persistence": self[
                 "land_cover_data/landsat_water_persistence"
             ][:],
-            "gridded_leaf_off_flag": self["land_cover_data/leaf_off_flag"][:],
-            "gridded_leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
-            "gridded_leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
+            "leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
+            "leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
         }
         return data
 
@@ -93,8 +91,8 @@ class L4ABeam(gedi_granule.GediBeam):
         filtered = self.main_data
         filtered = filtered[
             (filtered["l2_quality_flag"] == 1)
-            & (filtered["l4_quality_flag"] == 1)
-            & (filtered["algorithm_run_flag"] == 1)
+            # & (filtered["l4_quality_flag"] == 1)
+            # & (filtered["algorithm_run_flag"] == 1)
             & (filtered["sensitivity_a0"] >= 0.9)
             & (filtered["sensitivity_a0"] <= 1.0)
             & (filtered["sensitivity_a2"] <= 1.0)
@@ -102,24 +100,21 @@ class L4ABeam(gedi_granule.GediBeam):
             & (filtered["surface_flag"] == 1)
         ]
         filtered = filtered[
-            (
-                (filtered["gridded_pft_class"] == 2)
-                & (filtered["sensitivity_a2"] > 0.98)
-            )
+            ((filtered["pft_class"] == 2) & (filtered["sensitivity_a2"] > 0.98))
             | (
-                (filtered["gridded_pft_class"] != 2)
+                (filtered["pft_class"] != 2)
                 & (filtered["sensitivity_a2"] > 0.95)
             )
         ]
         filtered = filtered[
-            (filtered["gridded_water_persistence"] < 10)
-            & (filtered["gridded_urban_proportion"] < 50)
+            (filtered["water_persistence"] < 10)
+            & (filtered["urban_proportion"] < 50)
         ]
         filtered = filtered.drop(
             [
                 "l2_quality_flag",
-                "l4_quality_flag",
-                "algorithm_run_flag",
+                # "l4_quality_flag",
+                # "algorithm_run_flag",
                 "surface_flag",
             ],
             axis=1,

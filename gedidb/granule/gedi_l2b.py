@@ -43,7 +43,7 @@ class L2BBeam(gedi_granule.GediBeam):
                 + pd.to_timedelta(self["delta_time"], unit="seconds")
             ),
             # Quality data
-            "algorithm_run_flag": self["algorithmrun_flag"][:],
+            "algorithmrun_flag": self["algorithmrun_flag"][:],
             "l2a_quality_flag": self["l2a_quality_flag"][:],
             "l2b_quality_flag": self["l2b_quality_flag"][:],
             "sensitivity": self["sensitivity"][:],
@@ -64,7 +64,7 @@ class L2BBeam(gedi_granule.GediBeam):
             "pgap_theta": self["pgap_theta"][:],
             "pgap_theta_error": self["pgap_theta_error"][:],
             "rg": self["rg"][:],
-            "rh_100": self["rh100"][:],
+            "rh100": self["rh100"][:],
             "rhog": self["rhog"][:],
             "rhog_error": self["rhog_error"][:],
             "rhov": self["rhov"][:],
@@ -73,25 +73,21 @@ class L2BBeam(gedi_granule.GediBeam):
             "rv": self["rv"][:],
             "rx_range_highestreturn": self["rx_range_highestreturn"][:],
             # DEM
-            "dem_tandemx": self["geolocation/digital_elevation_model"][:],
+            "digital_elevation_model": self[
+                "geolocation/digital_elevation_model"
+            ][:],
             # Land cover data: NOTE this is gridded and/or derived data
-            "gridded_leaf_off_flag": self["land_cover_data/leaf_off_flag"][:],
-            "gridded_leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
-            "gridded_leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
-            "gridded_water_persistence": self[
+            "leaf_off_flag": self["land_cover_data/leaf_off_flag"][:],
+            "leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
+            "leaf_on_cycle": self["land_cover_data/leaf_on_cycle"][:],
+            "water_persistence": self[
                 "land_cover_data/landsat_water_persistence"
             ][:],
-            "gridded_urban_proportion": self[
-                "land_cover_data/urban_proportion"
-            ][:],
-            "interpolated_modis_nonvegetated": self[
-                "land_cover_data/modis_nonvegetated"
-            ][:],
-            "interpolated_modis_treecover": self[
-                "land_cover_data/modis_treecover"
-            ][:],
-            "gridded_pft_class": self["land_cover_data/pft_class"][:],
-            "gridded_region_class": self["land_cover_data/region_class"][:],
+            "urban_proportion": self["land_cover_data/urban_proportion"][:],
+            "modis_nonvegetated": self["land_cover_data/modis_nonvegetated"][:],
+            "modis_treecover": self["land_cover_data/modis_treecover"][:],
+            "pft_class": self["land_cover_data/pft_class"][:],
+            "region_class": self["land_cover_data/region_class"][:],
             # Processing data
             "selected_l2a_algorithm": self["selected_l2a_algorithm"][:],
             "selected_rg_algorithm": self["selected_rg_algorithm"][:],
@@ -132,29 +128,29 @@ class L2BBeam(gedi_granule.GediBeam):
 
         filtered = self.main_data
         filtered["elevation_difference_tdx"] = (
-            filtered["elev_lowestmode"] - filtered["dem_tandemx"]
+            filtered["elev_lowestmode"] - filtered["digital_elevation_model"]
         )
         filtered = filtered[
             (filtered["l2a_quality_flag"] == 1)
             & (filtered["l2b_quality_flag"] == 1)
-            & (filtered["algorithm_run_flag"] == 1)
+            & (filtered["algorithmrun_flag"] == 1)
             & (filtered["sensitivity"] >= 0.9)
             & (filtered["sensitivity"] <= 1.0)
             & (filtered["degrade_flag"].isin(gedi_granule.QDEGRADE))
-            & (filtered["rh_100"] >= 0)
+            & (filtered["rh100"] >= 0)
             # L2B RH_100 is in cm, not m like L2A
-            & (filtered["rh_100"] < 12000)
+            & (filtered["rh100"] < 12000)
             & (filtered["surface_flag"] == 1)
             & (filtered["elevation_difference_tdx"] > -150)
             & (filtered["elevation_difference_tdx"] < 150)
-            & (filtered["gridded_water_persistence"] < 10)
-            & (filtered["gridded_urban_proportion"] < 50)
+            & (filtered["water_persistence"] < 10)
+            & (filtered["urban_proportion"] < 50)
         ]
         filtered = filtered.drop(
             [
                 "l2a_quality_flag",
                 "l2b_quality_flag",
-                "algorithm_run_flag",
+                "algorithmrun_flag",
                 "surface_flag",
             ],
             axis=1,

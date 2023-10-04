@@ -56,8 +56,10 @@ class L2ABeam(gedi_granule.GediBeam):
             "energy_total": self["energy_total"][:],
             "surface_flag": self["surface_flag"][:],
             # DEM
-            "dem_tandemx": self["digital_elevation_model"][:],
-            "dem_srtm": self["digital_elevation_model_srtm"][:],
+            "digital_elevation_model": self["digital_elevation_model"][:],
+            "digital_elevation_model_srtm": self[
+                "digital_elevation_model_srtm"
+            ][:],
             # Processing data
             "selected_algorithm": self["selected_algorithm"][:],
             "selected_mode": self["selected_mode"][:],
@@ -82,7 +84,7 @@ class L2ABeam(gedi_granule.GediBeam):
         """
         filtered = self.main_data
         filtered["elevation_difference_tdx"] = (
-            filtered["elev_lowestmode"] - filtered["dem_tandemx"]
+            filtered["elev_lowestmode"] - filtered["digital_elevation_model"]
         )
         filtered = filtered[
             (filtered["quality_flag"] == 1)
@@ -97,9 +99,7 @@ class L2ABeam(gedi_granule.GediBeam):
             & (filtered["elevation_difference_tdx"] > -150)
             & (filtered["elevation_difference_tdx"] < 150)
         ]
-        filtered = filtered.drop(
-            ["elevation_difference_tdx", "quality_flag", "surface_flag"], axis=1
-        )
+        filtered = filtered.drop(["quality_flag", "surface_flag"], axis=1)
         self._cached_data = filtered
 
 
