@@ -1,106 +1,107 @@
 import argparse
+from collections import defaultdict
+import time
+from typing import Any, Iterable, Tuple
 import geopandas as gpd
 import os
 import pandas as pd
 import pathlib
 import pyspark.sql.types as T
-from pyspark.sql.functions import collect_list
+from pyspark.sql.functions import collect_list, array
 import shutil
-import sqlalchemy
 import subprocess
 import tempfile
 
-from gedidb.database import gedidb_loader
-from gedidb.granule import gedi_cmr_query as cmr
+from gedidb.database.column_to_field import FIELD_TO_COLUMN
+from gedidb.granule import granule_parser
+from gedidb.database import gedidb_common
+from gedidb.common import gedi_cmr_query as cmr, shape_parser
 from gedidb.granule import granule_name
-from gedidb.pipeline import shape_parser, spark_postgis
+from gedidb.pipeline import spark_postgis
 from gedidb import constants, environment
+from gedidb.common import earthdata
+from gedidb.constants import GediProduct
+import hashlib
+
+
+def hash_string_list(string_list: list) -> str:
+    joined = ",".join([f"{len(item)}:{item}" for item in string_list])
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()
+
 
 PRODUCTS = [
-    constants.GediProduct.L2A,
-    constants.GediProduct.L2B,
-    constants.GediProduct.L4A,
+    GediProduct.L2A,
+    GediProduct.L2B,
+    GediProduct.L4A,
 ]
 
 
-def _get_engine():
-    # Since spark runs workers in their own process, we cannot share database
-    # connections between workers. So we create a new connection for each query.
-    # This is reasonable because most of our queries involve
-    # inserting a large amount of data into the database.
-    return sqlalchemy.create_engine(environment.DB_CONFIG, echo=False)
+def _get_granule_key_for_filename(filename: str) -> str:
+    parsed = granule_name.parse_granule_filename(filename)
+    return f"{parsed.orbit}_{parsed.sub_orbit_granule}"
 
 
-def _fetch_cookies():
-    print("No authentication cookies found, fetching earthdata cookies ...")
-    netrc_file = environment.USER_PATH / ".netrc"
-    add_login = True
-    if netrc_file.exists():
-        with open(netrc_file, "r") as f:
-            if "urs.earthdata.nasa.gov" in f.read():
-                add_login = False
+def _get_saved_md_test():
+    # TODO: This makes no sense -- the shape and version could have changed.
+    # But, it's helpful for faster development.
+    md_file = environment.GEDI_PATH / "metadata.pickle"
+    if md_file.exists():
+        print("Using existing metadata: ", md_file)
+        import pickle
 
-    if add_login:
-        with open(environment.USER_PATH / ".netrc", "a+") as f:
-            f.write(
-                "\nmachine urs.earthdata.nasa.gov login {} password {}".format(
-                    environment.EARTHDATA_USER, environment.EARTHDATA_PASSWORD
-                )
-            )
-            os.fchmod(f.fileno(), 0o600)
-
-    environment.EARTH_DATA_COOKIE_FILE.touch()
-    subprocess.run(
-        [
-            "wget",
-            "--load-cookies",
-            constants.EARTH_DATA_COOKIE_FILE,
-            "--save-cookies",
-            constants.EARTH_DATA_COOKIE_FILE,
-            "--keep-session-cookies",
-            "https://urs.earthdata.nasa.gov",
-        ],
-        check=True,
-    )
+        with open(md_file, "rb") as f:
+            return pickle.load(f)
 
 
-def _get_orbit_metadata(shape: gpd.GeoSeries) -> gpd.GeoDataFrame:
-    metadata_list = []
+def _get_granule_metadata(shape: gpd.GeoSeries) -> gpd.GeoDataFrame:
+    if _get_saved_md_test() is not None:
+        return _get_saved_md_test()
+
+    md_list = []
     for product in PRODUCTS:
+        print("Querying NASA metadata API for product: ", product.value)
         df = cmr.query(product, spatial=shape)
-        # Note that orbits are NOT unique across product files.
-        # {orbit}_{ground_track}_{granule} is a unique file.
-        # However, these keys do not match across products.
-        df["orbit"] = df.granule_name.map(
-            granule_name.parse_granule_filename.orbit
-        )
+        df.rename({"granule_name": "granule_file"}, axis=1, inplace=True)
+        df["granule_key"] = df.granule_file.map(_get_granule_key_for_filename)
         df["product"] = product.value
-        metadata_list.append(df)
-    metadata = gpd.GeoDataFrame(pd.concat(metadata_list))
+        md_list.append(df)
+    md = gpd.GeoDataFrame(
+        pd.concat(md_list), geometry="granule_poly"
+    ).reset_index()
 
-    # Filter out orbits with incomplete product sets
-    # i.e. orbits that do not have at least one L2A, L2B, and L4A file
-    nprod = metadata[["product", "orbit"]].groupby("orbit")["product"].nunique()
-    omit = nprod[nprod < len(PRODUCTS)].index
-    print(f"Omitting {len(omit)} orbits with incomplete product sets:")
-    print(omit)
-    return metadata[~metadata.orbit.isin(omit)]
-
-
-def _query_downloaded():
-    return pd.read_sql_table(
-        table_name="orbit_table", columns=["granule_name"], con=_get_engine()
+    # Filter out granules with incomplete product sets
+    # i.e. granules that do not have exactly one L2A, L2B, and L4A file
+    nprod = (
+        md[["product", "granule_key"]]
+        .groupby("granule_key")["product"]
+        .nunique()
     )
+    omit = nprod[nprod != len(PRODUCTS)].index
+    print(
+        f"Omitting {len(omit)} (orbit, suborbit) pairs with incomplete product sets:"
+    )
+    print(omit)
+    md = md[~md.granule_key.isin(omit)].reset_index()
+    print("Total files found: ", len(md.index) - 1)
+    print("Total file size (MB): ", md["granule_size"].sum())
+    return md
 
 
-def _download_url(inp):
-    name, url, product, orbit = inp
-    outfile_path = environment.gedi_product_path(product) / name
-    if os.path.exists(outfile_path):
-        return outfile_path
-    with tempfile.NamedTemporaryFile(
-        dir=environment.gedi_product_path(product)
-    ) as temp:
+def _download_url(
+    input: Tuple[str, str, str, str]
+) -> Tuple[str, Tuple[GediProduct, pathlib.Path]]:
+    granule_key, granule_file, url, product = input
+    product = GediProduct(product)
+    outfile_path = environment.gedi_product_path(product) / granule_file
+    return_value = (granule_key, (product, outfile_path))
+    if outfile_path.exists():
+        return return_value
+
+    os.makedirs(outfile_path.parent, exist_ok=True)
+    try:
+        temp = tempfile.NamedTemporaryFile(
+            dir=environment.gedi_product_path(product),
+        )
         subprocess.run(
             [
                 "wget",
@@ -117,21 +118,166 @@ def _download_url(inp):
             ],
             check=True,
         )
+        # Sometimes the LP DAAC serves an empty L2A file even though the file exists.
+        # This ... is very annoying. It does not produce a wget error,
+        #           so we have to check for it manually.
+        # Wait 5 seconds and try downloading again. If that doesn't work,
+        # we have no choice but to raise.
+        # For this reason, run spark with some failure tolerance
+        # for large downloads so that the script doesn't crash all the time.
+        if os.path.getsize(temp.name) == 0:
+            time.sleep(5)
+            subprocess.run(
+                [
+                    "wget",
+                    "--load-cookies",
+                    environment.EARTH_DATA_COOKIE_FILE,
+                    "--save-cookies",
+                    environment.EARTH_DATA_COOKIE_FILE,
+                    "--auth-no-challenge=on",
+                    "--keep-session-cookies",
+                    "--content-disposition",
+                    "-O",
+                    temp.name,
+                    url,
+                ],
+                check=True,
+            )
+            if os.path.getsize(temp.name) == 0:
+                raise ValueError(f"Empty file: {url}")
         shutil.move(temp.name, outfile_path)
-    return outfile_path, product, orbit
+    finally:
+        # Attempt to clean up the temp file. This will usually fail since
+        # we've moved the file.
+        try:
+            temp.close()
+        except:
+            pass
+    return return_value
 
 
-def _process_orbit(input):
-    # Row(orbit='x', collect_list(files)=['y', 'y', 'y'])
-    # 1. Parse each file and do basic filtering, then close the file.
-    # TODO: where would we find out that files didn't download?
-    # Are undownloaded files still going to be in the list?
+def _process_granule(
+    row: Tuple[str, Iterable[Tuple[GediProduct, pathlib.Path]]]
+):
+    granule_key, granules = row
+    included_files = sorted([fname[1].name for fname in granules])
+    outfile_path = (
+        environment.GEDI_PATH
+        / "Granules"
+        / f"filtered_l2ab_l4a_{granule_key}_{hash_string_list(included_files)}.parquet"
+    )
+    return_value = (granule_key, outfile_path, included_files)
+    if os.path.exists(outfile_path):
+        return return_value
+
+    gdfs = {}
+    # 1. Parse each file and run per-product filtering.
+    for product, file in granules:
+        try:
+            gdfs[product] = (
+                granule_parser.parse_file(product, file, quality_filter=True)
+                .rename(lambda x: f"{x}_{product.value}", axis=1)
+                .rename({f"shot_number_{product.value}": "shot_number"}, axis=1)
+            )
+        except:
+            # TODO: Better error recovery for failed granules.
+            with open(
+                "/home/ah2174/gedi-database/logs/failed_granules.txt",
+                "a+",
+            ) as f:
+                f.write(f"{granule_key}\n")
+                f.write(f"{file}\n")
+                f.write(f"{included_files}\n")
+                raise
+
     # 2. Join all products on shot_number.
-    # 3. Perform better filtering with shared data
-    # 4. Drop unneeded columns
-    # 5. Write to parquet
-    # 6. Return path to parquet file
-    return
+    # Shots must be present in ALL THREE products to be included.
+    # Might also consider allowing shots that are missing L4A data,
+    # but for now we do not do this.
+    # Additional filtering (not done here):
+    #  - L4A quality_flag == 1
+    #  - L4A algorithm_run_flag == 1
+    #  - L4A predictor_limit_flag == 0
+    #  - L4A response_limit_flag == 0
+    #  - L2B stale_return_flag == 0
+    #  - UMD outliers: need EASE72 grid info
+
+    gdf = (
+        gdfs[GediProduct.L2A]
+        .join(
+            gdfs[GediProduct.L2B].set_index("shot_number"),
+            on="shot_number",
+            how="inner",
+        )
+        .join(
+            gdfs[GediProduct.L4A].set_index("shot_number"),
+            on="shot_number",
+            how="inner",
+        )
+        .drop(["geometry_level2B", "geometry_level4A"], axis=1)
+        .set_geometry("geometry_level2A")
+        .rename_geometry("geometry")
+    )
+
+    gdf["granule"] = granule_key
+
+    # We could drop redundant columns here ...
+    # or we can do that on import by selecting only the columns
+    # in the PostGIS schema.
+
+    # 4. Write to parquet
+    os.makedirs(outfile_path.parent, exist_ok=True)
+    gdf.to_parquet(
+        outfile_path, allow_truncated_timestamps=True, coerce_timestamps="us"
+    )
+    return return_value
+
+
+def _write_db(input):
+    granule_key, outfile_path, included_files = input
+
+    # Write all shots in the granule dataframe in a transaction while inserting
+    # the granule name into the granule table.
+    # If the transaction fails, we then know which granules need to be re-inserted
+    # and can re-insert the entire granule at once without checking whether
+    # individual shots are already in the database.
+    # This is important because it allows us to drop indexes and key constraints
+    # on the table while inserting, which increases performance considerably.
+    gedi_data = gpd.read_parquet(outfile_path)
+    if gedi_data.empty:
+        return
+    gedi_data = gedi_data[list(FIELD_TO_COLUMN.keys())]
+    gedi_data = gedi_data.rename(columns=FIELD_TO_COLUMN)
+    gedi_data = gedi_data.astype({"shot_number": "int64"})
+
+    with gedidb_common.get_engine().connect() as conn:
+        granule_entry = pd.DataFrame(
+            data={
+                "granule_name": [granule_key],
+                "granule_hash": [hash_string_list(included_files)],
+                "granule_file": [outfile_path.name],
+                "l2a_file": [included_files[0]],
+                "l2b_file": [included_files[1]],
+                "l4a_file": [included_files[2]],
+                "created_date": [pd.Timestamp.utcnow()],
+            }
+        )
+        granule_entry.to_sql(
+            name="gedi_granules",
+            con=conn,
+            index=False,
+            if_exists="append",
+        )
+
+        gedi_data.to_postgis(
+            name="filtered_l2ab_l4a_shots",
+            con=conn,
+            index=False,
+            if_exists="append",
+        )
+        conn.commit()
+        del gedi_data
+    return granule_entry
 
 
 def exec_spark(
@@ -139,78 +285,45 @@ def exec_spark(
     download_only: bool = False,
     dry_run: bool = False,
 ):
-    if not os.path.exists(environment.EARTH_DATA_COOKIE_FILE):
-        _fetch_cookies()
+    earthdata.authenticate()
     # 1. Construct table of file metadata from CMR API
-    metadata = _get_orbit_metadata(shape)
-    print("Total files found: ", len(metadata.index) - 1)
-    print("Total file size (MB): ", metadata["granule_size"].sum())
-
-    if download_only:
-        # TODO: Check the list of filtered orbit files
-        #      against the orbit metadata table
-        required_orbits = metadata
-    else:
-        stored_orbits = _query_downloaded()
-        required_orbits = metadata.loc[
-            ~metadata["orbit"].isin(stored_orbits["orbit"])
-        ]
-
-    if required_orbits.empty:
-        if download_only:
-            print("All orbits for this region already downloaded")
-        else:
-            print("All granules for this region already in the database")
-        return
+    required_granules = _get_granule_metadata(shape)
+    # TODO(amelia): Estimate size of download and print
 
     if dry_run:
         return
-    if download_only:
-        input("To proceed to download this data, press ENTER >>> ")
-    else:
-        input("To proceed to download AND INGEST this data, press ENTER >>> ")
-    for path in [environment.gedi_product_path(p) for p in PRODUCTS]:
-        if not os.path.exists(path):
-            print(
-                "Creating directory {}".format(
-                    environment.gedi_product_path(path)
-                )
-            )
-            os.mkdir(path)
+    input("To proceed, press ENTER >>> ")
 
     ## SPARK STARTS HERE ##
     # 2. Download granule files to shared location
-    #    >> Ensure success for all granules in metadata table
-    #    >> Warn about and omit granules if any product failed to download
-    #    >> Later improvement: Okay if L2 exists even if L4 doesn't?
-    #    >> Missed granules will be picked up in the next run.
     spark = spark_postgis.get_spark()
-    name_url = required_orbits[
-        ["granule_name", "granule_url", "product", "orbit"]
-    ].to_records(index=False)
-    urls = spark.sparkContext.parallelize(name_url)
-    out_schema = T.StructType(
+    name_url = required_granules[
         [
-            T.StructField("file", T.StringType(), True),
-            T.StructField("product", T.StringType(), True),
-            T.StructField("orbit", T.StringType(), True),
+            "granule_key",
+            "granule_file",
+            "granule_url",
+            "product",
         ]
-    )
-    files = spark.createDataFrame(urls.map(_download_url), out_schema)
+    ].to_records(index=False)
+    # TODO(amelia):
+    # Partition by granule because the L2A files are huge compared to the other
+    # products. Try to evenly distribute these files across workers.
+    urls = spark.sparkContext.parallelize(name_url)
+    files_by_granule = urls.map(_download_url).groupByKey()
 
-    if download_only:
-        files.count()
-    else:
-        # 3. Parse HDF5 files into per-granule filtered parquet files
-        orbit_files = files.groupby("orbit").agg(collect_list("file"))
-        # Ideally, some of this could be done with sedona directly,
-        # but the python API does not yet support HDF5 files.
-        # https://hdfeos.org/examples/sedona.php
-        processed_orbits = orbit_files.rdd.map(_process_orbit)
+    # 3. Parse HDF5 files into per-granule filtered parquet files
+    # It would be nice if we could use Sedona for this,
+    # but the python API does not yet support HDF5 files.
+    # https://hdfeos.org/examples/sedona.php
+    processed_granules = files_by_granule.map(_process_granule)
 
-        # 4. Ingest granule parquet files into PostGIS database
-        # out = processed_orbits.coalesce(10).map(_write_db)
-        # out.count()
+    # # 4. Ingest granule parquet files into PostGIS database
+    gedidb_common.maybe_create_tables()
+    # TODO granule_poly
+    # limit to 15 concurrent connections to avoid overwhelming the DB
+    # this number was chosen somewhat arbitrarily
+    out = processed_granules.coalesce(15).map(_write_db)
+    out.count()
 
     spark.stop()
     print("done")
@@ -265,7 +378,7 @@ if __name__ == "__main__":
         exit(1)
 
     exec_spark(
-        [shp],
+        shp,
         download_only=args.download_only,
         dry_run=args.dry_run,
     )
