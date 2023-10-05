@@ -2,8 +2,17 @@ import unittest
 import unittest.mock
 import pathlib
 import geopandas as gpd
+import psycopg2
 from sqlalchemy import text
 import pandas as pd
+import numpy as np
+
+
+import logging
+
+logging.basicConfig()
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARN)
+
 
 from gedidb.pipeline.data_setup import _write_db
 from gedidb.database import gedidb_common
@@ -13,8 +22,7 @@ THIS_DIR = pathlib.Path(__file__).parent
 GRANULE_FNAME = (
     THIS_DIR
     / "data"
-    # / ("filtered_l2ab_l4a_O02027_02_cc426d921d3fa1585d1cc8a06a0ceda3.parquet")
-    / ("filtered_l2ab_l4a_O02920_04_4be532a9257e16103fd17672bb65442d.parquet")
+    / ("filtered_l2ab_l4a_O02027_02_cc426d921d3fa1585d1cc8a06a0ceda3.parquet")
 )
 
 # N.b. THESE CURRENTLY DON'T MATCH THE HASH in the file
@@ -48,9 +56,11 @@ class TestCase(unittest.TestCase):
             _write_db((GRANULE_NAME, GRANULE_FNAME, INCLUDED_FILES))
 
         with self.engine.connect() as conn:
-            granule_df = pd.read_sql(text("SELECT * FROM gedi_granules"), conn)
+            granule_df = pd.read_sql_query(
+                f"SELECT * FROM gedi_granules WHERE granule_name = '{GRANULE_NAME}'",
+                conn,
+            )
             self.assertEqual(len(granule_df), 1)
-            self.assertEqual(granule_df.iloc[0]["granule_name"], GRANULE_NAME)
             self.assertEqual(
                 granule_df.iloc[0]["granule_file"], GRANULE_FNAME.name
             )
@@ -103,18 +113,59 @@ class TestCase(unittest.TestCase):
             self.assertEqual(shot_orig.geometry.y, shot_new.geometry.item().y)
 
     def test_handle_empty(self):
+        # Test that we can handle an empty file:
+        #   - do not crash
+        #   - do not insert anything into the database
+        # We create a file that doesn't have the right columns
+        # So it would crash if the code tried to insert anything
+        # into the database
         gpd.GeoDataFrame(pd.DataFrame({"geometry": None}, index=[])).to_parquet(
             "/tmp/empty.parquet"
         )
         with unittest.mock.patch(
             "gedidb.database.gedidb_common.get_engine", return_value=self.engine
         ):
-            _write_db((GRANULE_NAME, "/tmp/empty.parquet", INCLUDED_FILES))
+            _write_db(
+                (
+                    GRANULE_NAME,
+                    pathlib.Path("/tmp/empty.parquet"),
+                    INCLUDED_FILES,
+                )
+            )
 
-        # Don't crash.
-        # This file doesn't have the right columns, either
-        # So it would crash if the code tried to insert anything
-        # into the database
+    def test_transactional_commit(self):
+        # If the code crashes when trying to insert GEDI shots,
+        # the granule name should not appear in the granules table.
+        # We can force the code to crash on commit by trying to insert
+        # an invalid dataframe
+
+        invalid = gpd.read_parquet(GRANULE_FNAME).reset_index(drop=True)
+        invalid.loc[0, "cover_level2B"] = np.nan
+        invalid.to_parquet("/tmp/invalid.parquet")
+
+        with self.assertRaises(psycopg2.errors.NotNullViolation):
+            with unittest.mock.patch(
+                "gedidb.database.gedidb_common.get_engine",
+                return_value=self.engine,
+            ):
+                _write_db(
+                    (
+                        "invalid",
+                        pathlib.Path("/tmp/invalid.parquet"),
+                        INCLUDED_FILES,
+                    )
+                )
+
+        with self.engine.connect() as conn:
+            granules = pd.read_sql_query(
+                "SELECT * FROM gedi_granules",
+                conn,
+            )
+            granules = pd.read_sql_query(
+                "SELECT * FROM gedi_granules WHERE granule_name = 'invalid'",
+                conn,
+            )
+            self.assertTrue(granules.empty)
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestCase)
