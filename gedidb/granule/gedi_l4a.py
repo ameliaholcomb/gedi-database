@@ -73,7 +73,7 @@ class L4ABeam(gedi_granule.GediBeam):
             "pft_class": self["land_cover_data/pft_class"][:],
             "region_class": self["land_cover_data/region_class"][:],
             "urban_proportion": self["land_cover_data/urban_proportion"][:],
-            "water_persistence": self[
+            "landsat_water_persistence": self[
                 "land_cover_data/landsat_water_persistence"
             ][:],
             "leaf_on_doy": self["land_cover_data/leaf_on_doy"][:],
@@ -107,7 +107,7 @@ class L4ABeam(gedi_granule.GediBeam):
             )
         ]
         filtered = filtered[
-            (filtered["water_persistence"] < 10)
+            (filtered["landsat_water_persistence"] < 10)
             & (filtered["urban_proportion"] < 50)
         ]
         filtered = filtered.drop(
