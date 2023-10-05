@@ -8,16 +8,22 @@ import pandas as pd
 from gedidb.pipeline.data_setup import _write_db
 from gedidb.database import gedidb_common
 
-GRANULE_FNAME = pathlib.Path(
-    "./data/filtered_l2ab_l4a_O02806_01_52534f927d60fc7dca2accaca7357d91.parquet"
+THIS_DIR = pathlib.Path(__file__).parent
+
+GRANULE_FNAME = (
+    THIS_DIR
+    / "data"
+    # / ("filtered_l2ab_l4a_O02027_02_cc426d921d3fa1585d1cc8a06a0ceda3.parquet")
+    / ("filtered_l2ab_l4a_O02920_04_4be532a9257e16103fd17672bb65442d.parquet")
 )
-# these need to really match the hash in the granule filename
+
+# N.b. THESE CURRENTLY DON'T MATCH THE HASH in the file
 GRANULE_L2A_FILE = "GEDI02_A_2019162130932_O02806_01_T04237_02_003_01_V002.h5"
 GRANULE_L2B_FILE = "GEDI02_B_2019162130932_O02806_01_T04237_02_003_01_V002.h5"
 GRANULE_L4A_FILE = "GEDI04_A_2019162130932_O02806_01_T04237_02_002_02_V002.h5"
 INCLUDED_FILES = [GRANULE_L2A_FILE, GRANULE_L2B_FILE, GRANULE_L4A_FILE]
 
-GRANULE_NAME = "O02806_01"
+GRANULE_NAME = "O02027_02"
 
 
 def _array_from_dictstring(dictstring):
@@ -95,6 +101,20 @@ class TestCase(unittest.TestCase):
             )
             self.assertEqual(shot_orig.geometry.x, shot_new.geometry.item().x)
             self.assertEqual(shot_orig.geometry.y, shot_new.geometry.item().y)
+
+    def test_handle_empty(self):
+        gpd.GeoDataFrame(pd.DataFrame({"geometry": None}, index=[])).to_parquet(
+            "/tmp/empty.parquet"
+        )
+        with unittest.mock.patch(
+            "gedidb.database.gedidb_common.get_engine", return_value=self.engine
+        ):
+            _write_db((GRANULE_NAME, "/tmp/empty.parquet", INCLUDED_FILES))
+
+        # Don't crash.
+        # This file doesn't have the right columns, either
+        # So it would crash if the code tried to insert anything
+        # into the database
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(TestCase)

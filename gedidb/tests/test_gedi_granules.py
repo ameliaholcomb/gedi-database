@@ -1,16 +1,30 @@
 import unittest
 from gedidb.granule import gedi_l4a, gedi_l2b, gedi_l2a, gedi_l1b
-import h5py
+import pathlib
+import warnings
 
-L4A_NAME = "./data/GEDI04_A_2019110062417_O01994_04_T02062_02_002_01_V002.h5"
-L2B_NAME = "./data/GEDI02_B_2019171194823_O02950_04_T00250_02_003_01_V002.h5"
-L2A_NAME = "./data/GEDI02_A_2019162222610_O02812_04_T01244_02_003_01_V002.h5"
-
-L2B_NAME = "/maps/forecol/data/GEDI/level2B/GEDI02_B_2019117051430_O02102_01_T04603_02_003_01_V002.h5"
-L4A_NAME = "/maps/forecol/data/GEDI/level4A/GEDI04_A_2019117051430_O02102_01_T04603_02_002_02_V002.h5"
+THIS_DIR = pathlib.Path(__file__).parent
+L4A_NAME = (
+    THIS_DIR
+    / "data"
+    / "GEDI04_A_2019117051430_O02102_01_T04603_02_002_02_V002.h5"
+).as_posix()
+L2B_NAME = (
+    THIS_DIR
+    / "data"
+    / "GEDI02_B_2019117051430_O02102_01_T04603_02_003_01_V002.h5"
+).as_posix()
+L2A_NAME = (
+    THIS_DIR
+    / "data"
+    / "GEDI02_A_2019162222610_O02812_04_T01244_02_003_01_V002.h5"
+).as_posix()
 
 
 class TestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        warnings.simplefilter("ignore", DeprecationWarning)
+
     def _generic_test_parse_granule(self, granule):
         n_filtered = 0
         for beam in granule.iter_beams():
@@ -35,6 +49,8 @@ class TestCase(unittest.TestCase):
             self.assertLessEqual(len(gdf), data_len_orig)
             n_filtered += len(gdf)
         # But at least _some_ shots should be valid
+        # (Again, maybe not true for all files --
+        # but true for the test files)
         self.assertNotEqual(n_filtered, 0)
 
     def test_parse_granule_l4a(self):
