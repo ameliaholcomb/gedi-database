@@ -145,6 +145,9 @@ class L2BBeam(gedi_granule.GediBeam):
             & (filtered["elevation_difference_tdx"] < 150)
             & (filtered["water_persistence"] < 10)
             & (filtered["urban_proportion"] < 50)
+            # Additional (Amelia) filters:
+            & (~np.isnan(filtered["cover"]))
+            & (filtered["pai"] != -9999.0)
         ]
         filtered = filtered.drop(
             [
