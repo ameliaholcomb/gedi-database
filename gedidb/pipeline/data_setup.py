@@ -1,17 +1,16 @@
 import argparse
-from collections import defaultdict
 import time
-from typing import Any, Iterable, Tuple
+from typing import Iterable, Tuple
 import geopandas as gpd
 import os
 import pandas as pd
 import pathlib
-import pyspark.sql.types as T
-from pyspark.sql.functions import collect_list, array
 import shutil
 import subprocess
 import tempfile
-
+import warnings
+import psycopg2.errors
+import pyarrow.lib
 from gedidb.database.column_to_field import FIELD_TO_COLUMN
 from gedidb.granule import granule_parser
 from gedidb.database import gedidb_common
@@ -179,6 +178,15 @@ def _process_granule(
                 .rename(lambda x: f"{x}_{product.value}", axis=1)
                 .rename({f"shot_number_{product.value}": "shot_number"}, axis=1)
             )
+            if gdfs[product].empty:
+                # Write an empty file as a placeholder
+                # TODO(amelia): Can we do something better here?
+                # we could at least use the columns in the schema
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    gdfs[product].to_parquet(outfile_path)
+                return return_value
+
         except:
             # TODO: Better error recovery for failed granules.
             with open(
@@ -243,14 +251,21 @@ def _write_db(input):
     # individual shots are already in the database.
     # This is important because it allows us to drop indexes and key constraints
     # on the table while inserting, which increases performance considerably.
-    gedi_data = gpd.read_parquet(outfile_path)
+    try:
+        gedi_data = gpd.read_parquet(outfile_path)
+    except pyarrow.lib.ArrowInvalid as e:
+        print(f"WARNING: Corrupted file {outfile_path}")
+        print(e)
+        os.remove(outfile_path)
+        return
+
     if gedi_data.empty:
         return
     gedi_data = gedi_data[list(FIELD_TO_COLUMN.keys())]
     gedi_data = gedi_data.rename(columns=FIELD_TO_COLUMN)
     gedi_data = gedi_data.astype({"shot_number": "int64"})
 
-    with gedidb_common.get_engine().connect() as conn:
+    with gedidb_common.get_engine().begin() as conn:
         granule_entry = pd.DataFrame(
             data={
                 "granule_name": [granule_key],
@@ -288,7 +303,14 @@ def exec_spark(
     earthdata.authenticate()
     # 1. Construct table of file metadata from CMR API
     required_granules = _get_granule_metadata(shape)
-    # TODO(amelia): Estimate size of download and print
+    with gedidb_common.get_engine().connect() as conn:
+        # TODO(amelia): Also deal with the hash correctly
+        existing_granules = pd.read_sql_query(
+            "SELECT granule_name FROM gedi_granules", conn
+        )
+        required_granules = required_granules[
+            ~required_granules.granule_key.isin(existing_granules.granule_name)
+        ]
 
     if dry_run:
         return
