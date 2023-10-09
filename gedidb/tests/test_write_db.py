@@ -134,7 +134,7 @@ class TestCase(unittest.TestCase):
             )
 
     def test_transactional_commit(self):
-        # If the code crashes when trying to insert GEDI shots,
+        # If there is an exception when trying to insert GEDI shots,
         # the granule name should not appear in the granules table.
         # We can force the code to crash on commit by trying to insert
         # an invalid dataframe
@@ -157,10 +157,6 @@ class TestCase(unittest.TestCase):
                 )
 
         with self.engine.connect() as conn:
-            granules = pd.read_sql_query(
-                "SELECT * FROM gedi_granules",
-                conn,
-            )
             granules = pd.read_sql_query(
                 "SELECT * FROM gedi_granules WHERE granule_name = 'invalid'",
                 conn,
