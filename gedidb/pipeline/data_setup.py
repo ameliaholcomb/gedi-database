@@ -53,8 +53,8 @@ def _get_saved_md_test():
 
 
 def _get_granule_metadata(shape: gpd.GeoSeries) -> gpd.GeoDataFrame:
-    if _get_saved_md_test() is not None:
-        return _get_saved_md_test()
+    # if _get_saved_md_test() is not None:
+    #     return _get_saved_md_test()
 
     md_list = []
     for product in PRODUCTS:
@@ -390,7 +390,7 @@ if __name__ == "__main__":
                     "The NASA API can only accept up to 5000 vertices in a single shape,\n"
                     "but the shape you supplied has {} vertices.\n"
                     "If you would like to automatically simplify this shape to its\n"
-                    "bounding box, press ENTER, otherwise Ctrl-C to quit."
+                    "convex hull, press ENTER, otherwise Ctrl-C to quit."
                 ).format(exc.n_coords)
             )
             shp = shape_parser.check_and_format_shape(shp, simplify=True)
