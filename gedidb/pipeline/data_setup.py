@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import tempfile
 import warnings
-import psycopg2.errors
 import pyarrow.lib
 from gedidb.database.column_to_field import FIELD_TO_COLUMN
 from gedidb.granule import granule_parser
@@ -264,6 +263,7 @@ def _write_db(input):
     gedi_data = gedi_data[list(FIELD_TO_COLUMN.keys())]
     gedi_data = gedi_data.rename(columns=FIELD_TO_COLUMN)
     gedi_data = gedi_data.astype({"shot_number": "int64"})
+    print(f"Writing granule: {granule_key}")
 
     with gedidb_common.get_engine().begin() as conn:
         granule_entry = pd.DataFrame(
@@ -297,6 +297,7 @@ def _write_db(input):
 
 def exec_spark(
     shape: gpd.GeoSeries,
+    confirm: bool = True,
     download_only: bool = False,
     dry_run: bool = False,
 ):
@@ -314,7 +315,8 @@ def exec_spark(
 
     if dry_run:
         return
-    input("To proceed, press ENTER >>> ")
+    if confirm:
+        input("To proceed, press ENTER >>> ")
 
     ## SPARK STARTS HERE ##
     # 2. Download granule files to shared location
@@ -342,9 +344,9 @@ def exec_spark(
     # # 4. Ingest granule parquet files into PostGIS database
     gedidb_common.maybe_create_tables()
     # TODO granule_poly
-    # limit to 15 concurrent connections to avoid overwhelming the DB
+    # limit to 8 concurrent connections to avoid overwhelming the DB
     # this number was chosen somewhat arbitrarily
-    out = processed_granules.coalesce(15).map(_write_db)
+    out = processed_granules.coalesce(8).map(_write_db)
     out.count()
 
     spark.stop()
@@ -360,6 +362,12 @@ if __name__ == "__main__":
         help="Shapefile (zip) containing the world region to download.",
         type=str,
     )
+    parser.add_argument(
+        "--confirm",
+        help="Ask for confirmation of download plan before starting.",
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.set_defaults(confirm=True)
     parser.add_argument(
         "--dry_run",
         help=("Dry run only: save all found granules to temporary file."),
@@ -401,6 +409,7 @@ if __name__ == "__main__":
 
     exec_spark(
         shp,
+        confirm=args.confirm,
         download_only=args.download_only,
         dry_run=args.dry_run,
     )
