@@ -15,10 +15,6 @@ SRC_PATH = constants_path.parent
 PROJECT_PATH = SRC_PATH.parent
 CONDA_ENV = os.getenv("CONDA_DEFAULT_ENV")
 
-# Log relatedd paths
-LOG_PATH = PROJECT_PATH / "logs"
-LOG_PATH.mkdir(parents=True, exist_ok=True)
-
 #  Data related paths
 DATA_PATH = Path(os.environ["DATA_PATH"])
 USER_PATH = Path(os.environ["USER_PATH"])
@@ -36,22 +32,6 @@ def gedi_product_path(product: GediProduct) -> Path:
 GEDI_L1B_PATH = gedi_product_path(GediProduct.L1B)
 GEDI_L2A_PATH = gedi_product_path(GediProduct.L2A)
 GEDI_L4A_PATH = gedi_product_path(GediProduct.L4A)
-JRC_PATH = DATA_PATH / "JRC"
-ENV_VARS_PATH = DATA_PATH / "EnvVars"
-
-ENV_VARS_NAMES = ["defMean", "SCCsoil", "fpar", "lightning", "srtm"]
-
-
-# ---------------- LOGGING CONSTANTS ----------------
-DEFAULT_FORMATTER = logging.Formatter(
-    (
-        "%(asctime)s %(levelname)s: %(message)s "
-        "[in %(funcName)s at %(pathname)s:%(lineno)d]"
-    )
-)
-DEFAULT_LOG_FILE = LOG_PATH / "default_log.log"
-DEFAULT_LOG_LEVEL = logging.INFO  # verbose logging per default
-
 
 # ---------------- DATABASE CONSTANTS ----------------
 DB_HOST = os.getenv("DB_HOST")  # JASMIN database server
