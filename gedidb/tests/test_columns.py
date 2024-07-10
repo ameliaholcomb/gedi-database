@@ -123,12 +123,6 @@ class TestCase(unittest.TestCase):
         warnings.warn("l2b_quality_flag_level2B not in Columns", UserWarning)
         cl2a.remove("surface_flag_level2A")
         warnings.warn("surface_flag_level2A not in Columns", UserWarning)
-        # We SHOULD HAVE "selected_algorithm_level4A" in the DB
-        # but unfortunately it has the same name as "selected_algorithm_level2A"
-        # and we only included the L2A one.
-        # A correct test would include:
-        # cl4a.append("selected_algorithm_level4A")
-        warnings.warn("selected_algorithm_level4A not in Columns", UserWarning)
 
         # Other exceptions:
         # I don't think I care about these fields? But they're not in the DB.
