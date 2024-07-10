@@ -6,6 +6,7 @@ import psycopg2
 from sqlalchemy import text
 import pandas as pd
 import numpy as np
+import warnings
 
 
 import logging
@@ -44,6 +45,7 @@ class TestCase(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.engine = gedidb_common.get_test_engine()
         gedidb_common.Base.metadata.create_all(cls.engine)
+        warnings.simplefilter("ignore", FutureWarning)
 
     @classmethod
     def tearDownClass(cls) -> None:
