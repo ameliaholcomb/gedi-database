@@ -77,8 +77,8 @@ COLUMN_TO_FIELD = {
     # Land cover data: NOTE this is gridded and/or derived data
     "gridded_pft_class": "pft_class_level4A",
     "gridded_region_class": "region_class_level4A",
-    "gridded_urban_proportion": "urban_proportion_level4A",
-    "gridded_water_persistence": "landsat_water_persistence_level4A",
+    "gridded_urban_proportion": "urban_proportion_level2B",
+    "gridded_water_persistence": "water_persistence_level2B",
     "gridded_leaf_off_flag": "leaf_off_flag_level2B",
     "gridded_leaf_on_doy": "leaf_on_doy_level2B",
     "gridded_leaf_on_cycle": "leaf_on_cycle_level2B",
