@@ -75,6 +75,9 @@ class TestCase(unittest.TestCase):
         cl2a.remove("quality_flag_level2A")
         cl2b.remove("l2a_quality_flag_level2B")
         cl4a.remove("l2_quality_flag_level4A")
+        # We pre-filter for shots within 150m of the TDX DEM,
+        # which is more stringent than this flag.
+        cl2a.remove("surface_flag_level2A")
         # L2B has less precise sensitivity data than other products
         cl2b.remove("sensitivity_level2B")
         # rh_100 is called rh100 in L2B
@@ -121,8 +124,6 @@ class TestCase(unittest.TestCase):
         warnings.warn("algorithmrun_flag_level2B not in Columns", UserWarning)
         cl2b.remove("l2b_quality_flag_level2B")
         warnings.warn("l2b_quality_flag_level2B not in Columns", UserWarning)
-        cl2a.remove("surface_flag_level2A")
-        warnings.warn("surface_flag_level2A not in Columns", UserWarning)
 
         # Other exceptions:
         # I don't think I care about these fields? But they're not in the DB.
