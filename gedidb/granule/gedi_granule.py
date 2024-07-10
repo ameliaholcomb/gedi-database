@@ -1,4 +1,5 @@
 """Module for convenient objects to deal with GEDI data products"""
+
 from __future__ import annotations
 
 import geopandas as gpd
@@ -35,10 +36,6 @@ class GediGranule(h5py.File):  # TODO  pylint: disable=missing-class-docstring
     @property
     def version(self) -> str:
         return self["METADATA"]["DatasetIdentification"].attrs["VersionID"]
-
-    def filename_metadata(self):
-        # Subclass must implement this
-        raise NotImplementedError
 
     @property
     def start_datetime(self) -> pd.Timestamp:
