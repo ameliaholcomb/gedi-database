@@ -15,11 +15,11 @@ CMR_URL = "https://cmr.earthdata.nasa.gov/search/"
 GRANULE_SEARCH_URL = CMR_URL + "granules.json"
 CMR_DT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 CMR_PROJECT_IDS = {
-    GediProduct.L1B: "C1908344278-LPDAAC_ECS",  # v002
-    GediProduct.L2A: "C1908348134-LPDAAC_ECS",  # v002
-    GediProduct.L2B: "C1908350066-LPDAAC_ECS",  # v002
+    GediProduct.L2A: "C2142771958-LPCLOUD",
+    GediProduct.L2B: "C2142776747-LPCLOUD",
     GediProduct.L3: "C2153683336-ORNL_CLOUD",
     GediProduct.L4A: "C2237824918-ORNL_CLOUD",
+    GediProduct.L4C: "C3049900163-ORNL_CLOUD",
 }
 
 
