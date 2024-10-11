@@ -76,7 +76,7 @@ def _get_granule_metadata(
         .groupby("granule_key")["product"]
         .nunique()
     )
-    omit = nprod[nprod != len(PRODUCTS)].index
+    omit = nprod[nprod != len(products)].index
     print(
         f"Omitting {len(omit)} (orbit, suborbit) pairs with incomplete product sets:"
     )
