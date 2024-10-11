@@ -1,6 +1,6 @@
 import argparse
 import time
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, List
 import geopandas as gpd
 import os
 import pandas as pd
@@ -51,12 +51,14 @@ def _get_saved_md_test():
             return pickle.load(f)
 
 
-def _get_granule_metadata(shape: gpd.GeoSeries) -> gpd.GeoDataFrame:
+def _get_granule_metadata(
+    shape: gpd.GeoSeries, products: List[str]
+) -> gpd.GeoDataFrame:
     # if _get_saved_md_test() is not None:
     #     return _get_saved_md_test()
 
     md_list = []
-    for product in PRODUCTS:
+    for product in products:
         print("Querying NASA metadata API for product: ", product.value)
         df = cmr.query(product, spatial=shape)
         df.rename({"granule_name": "granule_file"}, axis=1, inplace=True)
@@ -303,7 +305,7 @@ def exec_spark(
 ):
     earthdata.authenticate()
     # 1. Construct table of file metadata from CMR API
-    required_granules = _get_granule_metadata(shape)
+    required_granules = _get_granule_metadata(shape, PRODUCTS)
     with gedidb_common.get_engine().connect() as conn:
         # TODO(amelia): Also deal with the hash correctly
         existing_granules = pd.read_sql_query(
