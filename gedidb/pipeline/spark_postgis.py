@@ -2,7 +2,7 @@ import geopandas as gpd
 import pyproj
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StringType
-from pyspark.sql import DataFrame # for typing only
+from pyspark.sql import DataFrame  # for typing only
 from pyspark.sql.functions import udf
 from sedona.register import SedonaRegistrator
 from sedona.utils import SedonaKryoRegistrator, KryoSerializer
@@ -23,8 +23,8 @@ def get_spark():
         .config("spark.kryo.registrator", SedonaKryoRegistrator.getName)
         .config(
             "spark.jars.packages",
-            "org.apache.sedona:sedona-spark-shaded-3.0_2.12:1.4.1,"
-            "org.datasyslab:geotools-wrapper:1.4.0-28.2,"
+            "org.apache.sedona:sedona-spark-3.5_2.12:1.6.1,"
+            "org.datasyslab:geotools-wrapper:1.6.1-28.2,"
             "net.postgis:postgis-jdbc:2021.1.0,"
             "net.postgis:postgis-geometry:2021.1.0,"
             "org.postgresql:postgresql:42.5.4,",
