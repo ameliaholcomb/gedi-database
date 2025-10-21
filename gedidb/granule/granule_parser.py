@@ -45,7 +45,7 @@ def parse_file_l2a(file: Path, quality_filter=True) -> gpd.GeoDataFrame:
 
 def _parse(granule: GediGranule, quality_filter=True) -> gpd.GeoDataFrame:
     granule_data = []
-    for beam in tqdm(granule.iter_beams(), total=granule.n_beams):
+    for beam in granule.iter_beams():
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
