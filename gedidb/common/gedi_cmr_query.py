@@ -122,7 +122,7 @@ def _parse_granules(granules):
         if not g["online_access_flag"]:
             continue
 
-        if "LPDAAC" in g["data_center"]:
+        if "LP" in g["data_center"]:
             granule_name = g["producer_granule_id"]
         if "ORNL" in g["data_center"]:
             granule_name = g["title"].split(".", maxsplit=1)[1]
