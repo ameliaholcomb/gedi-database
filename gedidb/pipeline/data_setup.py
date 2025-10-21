@@ -82,6 +82,7 @@ def _get_granule_metadata(
     )
     print(omit)
     md = md[~md.granule_key.isin(omit)].reset_index()
+    print("Total granules found: ", md.granule_key.nunique())
     print("Total files found: ", len(md.index) - 1)
     print("Total file size (MB): ", md["granule_size"].sum())
     return md
