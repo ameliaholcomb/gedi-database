@@ -1,6 +1,7 @@
 import unittest
 import geopandas as gpd
 import pathlib
+from shapely import orient_polygons
 
 from gedidb.common.shape_parser import (
     get_n_coords,
@@ -19,7 +20,7 @@ class TestShapeParser(unittest.TestCase):
     # - over 4999 coordinates
     # - multiple features (rows)
     # - multipolygons among the features
-    # - clockwise orientation
+    # - polygons with holes
     # - geometries that span the antimeridian (180º)
     TEST_SHAPE = (
         THIS_DIR
@@ -33,15 +34,21 @@ class TestShapeParser(unittest.TestCase):
         self.assertEqual(n_coords, 346278)
 
     def test_orient_shape(self):
-        # The test shape is oriented clockwise
         shp = gpd.GeoDataFrame.from_file(self.TEST_SHAPE)
-        oriented = orient_shape(shp)
+        disoriented = orient_shape(shp, exterior_cw=False)
+        oriented = orient_shape(disoriented, exterior_cw=True)
         for poly in oriented:
             if poly.geom_type.startswith("Multi"):
                 for part in poly.geoms:
-                    self.assertTrue(part.exterior.is_ccw)
+                    self.assertFalse(part.exterior.is_ccw)
+                    if len(part.interiors) > 0:
+                        for interior in part.interiors:
+                            self.assertTrue(interior.is_ccw)
             else:
-                self.assertTrue(poly.exterior.is_ccw)
+                self.assertFalse(poly.exterior.is_ccw)
+                if len(poly.interiors) > 0:
+                    for interior in poly.interiors:
+                        self.assertTrue(interior.is_ccw)
 
     def test_get_covering_region_for_shape(self):
         shp = gpd.GeoDataFrame.from_file(self.TEST_SHAPE)

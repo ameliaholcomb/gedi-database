@@ -1,5 +1,5 @@
 from geopandas import gpd
-from shapely import geometry
+from shapely import geometry, orient_polygons
 
 
 class DetailError(Exception):
@@ -15,6 +15,7 @@ def get_covering_region_for_shape(shp: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     (as a bounding box or convex hull would), we instead tile the region into
     covering 1x1 degree boxes, and return the union of those boxes.
     """
+    step = 1
     # generate all the tiles in the world
     minx = -180
     maxx = 180
@@ -22,8 +23,8 @@ def get_covering_region_for_shape(shp: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     maxy = 90
     tiles = []
     for i in range(minx, maxx):
-        for j in range(maxy, miny, -1):
-            tile = geometry.box(i, j - 1, i + 1, j)
+        for j in range(maxy, miny, -step):
+            tile = geometry.box(i, j - step, i + step, j)
             tiles.append(tile)
     tile_df = gpd.GeoDataFrame(geometry=tiles, crs="EPSG:4326")
 
@@ -43,23 +44,41 @@ def get_n_coords(shp: gpd.GeoDataFrame) -> int:
     return n_coords
 
 
-def orient_shape(shp: gpd.GeoDataFrame) -> gpd.GeoSeries:
+def orient_shape(shp: gpd.GeoDataFrame, exterior_cw: bool) -> gpd.GeoSeries:
     """Orients the shape(s) in a GeoDataFrame to be clockwise"""
-    oriented = []
-    for row in shp.geometry:
-        if row.geom_type.startswith("Multi"):
-            oriented.append(
-                geometry.MultiPolygon(
-                    [geometry.polygon.orient(s) for s in row.geoms]
-                )
-            )
+    return shp.geometry.apply(orient_polygons, exterior_cw=exterior_cw)
+
+
+def close_holes(shp: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Closes any holes in polygons in a GeoDataFrame"""
+
+    def _close_holes_in_polygon(polygon: geometry.Polygon) -> geometry.Polygon:
+        return geometry.Polygon(polygon.exterior)
+
+    def _close_holes_in_geometry(
+        geom: geometry.base.BaseGeometry,
+    ) -> geometry.base.BaseGeometry:
+        if geom.geom_type == "Polygon":
+            return _close_holes_in_polygon(geom)
+        elif geom.geom_type == "MultiPolygon":
+            closed_parts = [
+                _close_holes_in_polygon(part) for part in geom.geoms
+            ]
+            return geometry.MultiPolygon(closed_parts)
         else:
-            oriented.append(geometry.polygon.orient(row))
-    return gpd.GeoSeries(oriented)
+            return geom  # Return as is if not Polygon or MultiPolygon
+
+    closed_geometries = shp.geometry.apply(_close_holes_in_geometry)
+    return gpd.GeoDataFrame(
+        shp.drop(columns="geometry"), geometry=closed_geometries, crs=shp.crs
+    )
 
 
 def check_and_format_shape(
-    shp: gpd.GeoDataFrame, simplify: bool = False, max_coords: int = 4999
+    shp: gpd.GeoDataFrame,
+    simplify: bool = False,
+    max_coords: int = 4999,
+    exterior_cw: bool = True,
 ) -> gpd.GeoSeries:
     """
     Checks a shape for compatibility with NASA's API.
@@ -68,6 +87,12 @@ def check_and_format_shape(
         shp (gpd.GeoDataFrame): The shape to check and format.
         simplify (bool): Whether to simplify the shape if it doesn't meet the max_coords threshold.
         max_coords (int): Threshold for simplifying, must be less than 5000 (NASA's upper-bound).
+        exterior_cw (bool): Whether to orient exteriors clockwise (True) or counter-clockwise (False).
+            NOTE: NASA's API has different requirements for different shape formats:
+            - ESRI Shapefile zipped: exterior_cw=True
+            - GeoJSON: exterior_cw=False
+            - Spatial params: exterior_cw=False
+            - KML: CURRENTLY NOT SUPPORTED (exteriors AND interiors would need to be ccw)
 
     Raises:
         ValueError: If max_coords is not less than 5000 or more than one polygon is supplied.
@@ -91,4 +116,8 @@ def check_and_format_shape(
                 but max_coords is {max_coords}"""
             )
 
-    return orient_shape(shp)
+    # The NASA API has some complicated and undocumented requirements
+    # about polygon holes. So for simplicity, we just close any holes.
+    shp = close_holes(shp)
+
+    return orient_shape(shp, exterior_cw=exterior_cw)
