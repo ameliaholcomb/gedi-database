@@ -1,4 +1,6 @@
 import argparse
+from datetime import datetime
+import re
 import time
 from typing import Iterable, Tuple, List
 import geopandas as gpd
@@ -33,6 +35,29 @@ PRODUCTS = [
     GediProduct.L4A,
 ]
 
+PARQUET_GRANULE_DIR = environment.GEDI_PATH / "Granules"
+PARQUET_PREFIX = "filtered_l2ab_l4a"
+
+
+def _get_parquet_file_for_granule(
+    granule_key: str, included_files: List[str]
+) -> pathlib.Path:
+    outfile_path = (
+        PARQUET_GRANULE_DIR
+        / f"{PARQUET_PREFIX}_{granule_key}_{hash_string_list(included_files)}.parquet"
+    )
+    return outfile_path
+
+
+def _get_granule_key_from_parquet_file(parquet_file: str) -> str:
+    filename = pathlib.Path(parquet_file).name
+    filename_pattern = rf"{PARQUET_PREFIX}_(.+?)_[a-f0-9]{{32}}\.parquet"
+    match = re.match(filename_pattern, filename)
+    if match:
+        return match.group(1)
+    else:
+        raise ValueError(f"Invalid parquet filename: {filename}")
+
 
 def _get_granule_key_for_filename(filename: str) -> str:
     parsed = granule_name.parse_granule_filename(filename)
@@ -60,7 +85,13 @@ def _get_granule_metadata(
     md_list = []
     for product in products:
         print("Querying NASA metadata API for product: ", product.value)
-        df = cmr.query(product, spatial=shape)
+        # For now, only using pre-hibernation data
+        print("WARNING: Using pre-hibernation data only.")
+        df = cmr.query(
+            product,
+            spatial=shape,
+            date_range=(datetime(2019, 4, 1), datetime(2023, 4, 1)),
+        )
         df.rename({"granule_name": "granule_file"}, axis=1, inplace=True)
         df["granule_key"] = df.granule_file.map(_get_granule_key_for_filename)
         df["product"] = product.value
@@ -89,13 +120,17 @@ def _get_granule_metadata(
 
 
 def _download_url(
-    input: Tuple[str, str, str, str]
+    input: Tuple[str, str, str, str],
 ) -> Tuple[str, Tuple[GediProduct, pathlib.Path]]:
     granule_key, granule_file, url, product = input
     product = GediProduct(product)
     outfile_path = environment.gedi_product_path(product) / granule_file
     return_value = (granule_key, (product, outfile_path))
+    # Skip download if H5 file already exists
     if outfile_path.exists():
+        return return_value
+    # Skip download if filtered parquet file already exists
+    if PARQUET_GRANULE_DIR.glob(f"{PARQUET_PREFIX}_{granule_key}_*.parquet"):
         return return_value
 
     os.makedirs(outfile_path.parent, exist_ok=True)
@@ -158,15 +193,11 @@ def _download_url(
 
 
 def _process_granule(
-    row: Tuple[str, Iterable[Tuple[GediProduct, pathlib.Path]]]
+    row: Tuple[str, Iterable[Tuple[GediProduct, pathlib.Path]]],
 ):
     granule_key, granules = row
     included_files = sorted([fname[1].name for fname in granules])
-    outfile_path = (
-        environment.GEDI_PATH
-        / "Granules"
-        / f"filtered_l2ab_l4a_{granule_key}_{hash_string_list(included_files)}.parquet"
-    )
+    outfile_path = _get_parquet_file_for_granule(granule_key, included_files)
     return_value = (granule_key, outfile_path, included_files)
     if os.path.exists(outfile_path):
         return return_value
@@ -184,9 +215,10 @@ def _process_granule(
                 # Write an empty file as a placeholder
                 # TODO(amelia): Can we do something better here?
                 # we could at least use the columns in the schema
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    gdfs[product].to_parquet(outfile_path)
+                empty = gpd.GeoDataFrame({}, geometry=[])
+                empty.to_parquet(outfile_path)
+                for _, f in granules:
+                    os.remove(f)
                 return return_value
 
         except:
@@ -240,6 +272,11 @@ def _process_granule(
     gdf.to_parquet(
         outfile_path, allow_truncated_timestamps=True, coerce_timestamps="us"
     )
+
+    # 5. Delete original h5 files
+    for product, file in granules:
+        os.remove(file)
+
     return return_value
 
 
@@ -255,13 +292,16 @@ def _write_db(input):
     # on the table while inserting, which increases performance considerably.
     try:
         gedi_data = gpd.read_parquet(outfile_path)
-    except pyarrow.lib.ArrowInvalid as e:
+    except (pyarrow.lib.ArrowInvalid, KeyError) as e:
         print(f"WARNING: Corrupted file {outfile_path}")
         print(e)
         os.remove(outfile_path)
         return
 
     if gedi_data.empty:
+        # TODO: It would be much better to insert the granule into the granules
+        # table even if there are no valid shots! This would allow us to avoid
+        # re-downloading granules containing bad data. For now, we just skip.
         return
     gedi_data = gedi_data[list(FIELD_TO_COLUMN.keys())]
     gedi_data = gedi_data.rename(columns=FIELD_TO_COLUMN)
@@ -307,6 +347,8 @@ def exec_spark(
     earthdata.authenticate()
     # 1. Construct table of file metadata from CMR API
     required_granules = _get_granule_metadata(shape, PRODUCTS)
+    print("Checking for existing granules in database...")
+    print("...")
     with gedidb_common.get_engine().connect() as conn:
         # TODO(amelia): Also deal with the hash correctly
         existing_granules = pd.read_sql_query(
@@ -315,6 +357,19 @@ def exec_spark(
         required_granules = required_granules[
             ~required_granules.granule_key.isin(existing_granules.granule_name)
         ]
+    partial_existing = PARQUET_GRANULE_DIR.glob(f"{PARQUET_PREFIX}_*.parquet")
+    existing_parquet_granules = [
+        _get_granule_key_from_parquet_file(f.name) for f in partial_existing
+    ]
+    tmp = required_granules[
+        ~required_granules.granule_key.isin(existing_parquet_granules)
+    ]
+    print("Remaining granules: ", tmp.granule_key.nunique())
+    print("Remaining files: ", len(tmp.index) - 1)
+    print(
+        "Total remaining file size to download (MB): ",
+        tmp["granule_size"].sum(),
+    )
 
     if dry_run:
         return
@@ -394,20 +449,27 @@ if __name__ == "__main__":
     shp = gpd.read_file(shapefile)
     try:
         try:
-            shp = shape_parser.check_and_format_shape(shp)
+            shp = shape_parser.check_and_format_shape(shp, exterior_cw=False)
         except shape_parser.DetailError as exc:
             input(
                 (
                     "The NASA API can only accept up to 5000 vertices in a single shape,\n"
                     "but the shape you supplied has {} vertices.\n"
-                    "If you would like to automatically simplify this shape to its\n"
-                    "convex hull, press ENTER, otherwise Ctrl-C to quit."
+                    "If you would like to automatically simplify this shape\n"
+                    "press ENTER, otherwise Ctrl-C to quit."
                 ).format(exc.n_coords)
             )
-            shp = shape_parser.check_and_format_shape(shp, simplify=True)
-    except ValueError:
-        print("This script only accepts one (multi)polygon at a time.")
-        print("Please split up each row of your shapefile into its own file.")
+            # we will pass as a geoJSON, so exterior_cw=False
+            shp = shape_parser.check_and_format_shape(
+                shp, simplify=True, exterior_cw=False
+            )
+    except ValueError as e:
+        print(e)
+        print(
+            "Even after simplification, it was not possible to reduce the"
+            "number of vertices below 4999. Try splitting the shape into"
+            "smaller parts."
+        )
         exit(1)
 
     exec_spark(
