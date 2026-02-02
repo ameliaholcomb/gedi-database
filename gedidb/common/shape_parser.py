@@ -9,20 +9,20 @@ class DetailError(Exception):
         self.n_coords = n_coords
 
 
-def get_covering_region_for_shape(shp: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+def get_covering_region_for_shape(shp: gpd.GeoDataFrame, tile_size: int = 1) -> gpd.GeoDataFrame:
     """The NASA CMR API can only handle shapes with less than 5000 points.
     To simplify shapes without adding lots of extra area
     (as a bounding box or convex hull would), we instead tile the region into
     covering 1x1 degree boxes, and return the union of those boxes.
     """
-    step = 1
+    step = tile_size
     # generate all the tiles in the world
     minx = -180
     maxx = 180
     miny = -90
     maxy = 90
     tiles = []
-    for i in range(minx, maxx):
+    for i in range(minx, maxx, step):
         for j in range(maxy, miny, -step):
             tile = geometry.box(i, j - step, i + step, j)
             tiles.append(tile)
@@ -77,7 +77,7 @@ def close_holes(shp: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 def check_and_format_shape(
     shp: gpd.GeoDataFrame,
     simplify: bool = False,
-    max_coords: int = 4999,
+    max_coords: int = 500,
     exterior_cw: bool = True,
 ) -> gpd.GeoSeries:
     """
@@ -86,7 +86,7 @@ def check_and_format_shape(
     Args:
         shp (gpd.GeoDataFrame): The shape to check and format.
         simplify (bool): Whether to simplify the shape if it doesn't meet the max_coords threshold.
-        max_coords (int): Threshold for simplifying, must be less than 5000 (NASA's upper-bound).
+        max_coords (int): Threshold for simplifying, must be less than 500.
         exterior_cw (bool): Whether to orient exteriors clockwise (True) or counter-clockwise (False).
             NOTE: NASA's API has different requirements for different shape formats:
             - ESRI Shapefile zipped: exterior_cw=True
@@ -101,14 +101,21 @@ def check_and_format_shape(
     Returns:
         GeoSeries: The possibly simplified shape.
     """
-    if max_coords > 4999:
-        raise ValueError("NASA's API can only cope with less than 5000 points")
+    # Though the NASA API technically specifies a limit of 5000 points,
+    # in practice it can only accept URLs of length up to 6000 characters.
+    # Since each point is typically ~12 characters (e.g. -123.0,45.0),
+    # we set a limit of 500 points here. Note that this may still be too high,
+    # depending on the number of characters/significant figures in your 
+    # vertices. Consider lowering max_coords (and possibly increasing
+    # tile_size in get_covering_region_for_shape, below).
+    if max_coords > 500:
+        raise ValueError("NASA's API can only cope with less than 500 points")
 
     n_coords = get_n_coords(shp)
     if n_coords > max_coords:
         if not simplify:
             raise DetailError(n_coords)
-        shp = get_covering_region_for_shape(shp)
+        shp = get_covering_region_for_shape(shp, tile_size=2)
         n_coords = get_n_coords(shp)
         if n_coords > max_coords:
             raise ValueError(
